@@ -2462,12 +2462,10 @@ namespace ns3
 
     ///////////////////////========================================
 
-//RdmaSmartFlowRouting::s_relErrorStats.Dump(varMap->outputFileDir);
-// RdmaSmartFlowRouting::s_relErrorStats.DumpHopDiffStats(varMap->outputFileDir);
-//RdmaSmartFlowRouting::s_relErrorStats.DumpCongestionDiffStats(varMap->outputFileDir);
-RdmaSmartFlowRouting::s_relErrorStats.CoutHighestWeightPercent();
-std::cout << "拒绝比例:" << (double)(RdmaSmartFlowRouting::s_relErrorStats.rejected_cnt)/
-(RdmaSmartFlowRouting::s_relErrorStats.rejected_cnt + RdmaSmartFlowRouting::s_relErrorStats.sample_cnt) << std::endl;
+RdmaSmartFlowRouting::s_relErrorStats.Dump(varMap->outputFileDir);
+RdmaSmartFlowRouting::s_relErrorStats.DumpHopDiffStats(varMap->outputFileDir);
+RdmaSmartFlowRouting::s_relErrorStats.DumpCongestionDiffStats(varMap->outputFileDir);
+
     std::map<uint32_t, QpRecordEntry> & recordMap = RdmaHw::m_recordQpExec;
     std::vector<std::pair<uint32_t, QpRecordEntry>> recordVec(recordMap.begin(), recordMap.end());
 
@@ -2605,79 +2603,114 @@ std::cout << "拒绝比例:" << (double)(RdmaSmartFlowRouting::s_relErrorStats.r
     fclose(file);
     return;
   }
+  void save_avg_port_length(global_variable_t *varMap){
 
-void save_avg_port_length(global_variable_t *varMap){
-
-    std::string file_name = varMap->outputFileDir + "-All_Arg_avg_queue_length.txt";
-    
-    // 先读取现有文件内容，检查是否已存在相同的fileIdx
-    std::vector<std::string> file_lines;
-    std::ifstream infile(file_name);
-    std::string line;
-    bool found_existing = false;
-    
-    if (infile.is_open()) {
-        while (std::getline(infile, line)) {
-            // 检查是否包含当前的fileIdx
-            if (line.find("fileIdx:" + varMap->fileIdx) != std::string::npos) {
-                found_existing = true;
-                // 跳过旧的记录行
-                std::getline(infile, line); // 跳过avg_port_length行
-                continue;
-            }
-            file_lines.push_back(line);
-        }
-        infile.close();
-    }
-    
-    // 以追加模式打开文件
-    FILE *file = fopen(file_name.c_str(), "a");
+    std::string file_name = varMap->outputFileDir + varMap->fileIdx +"-All_port_avg_queue_length.txt";
+      FILE *file = fopen(file_name.c_str(), "w");
     if (file == NULL)
     {
-        perror("Error opening file");
-        return;
+      perror("Error opening file");
+      return;
     }
+        // 写入文件头信息
+    fprintf(file, "NodeID\tPortID\tAverageQueueLength\tSampleCount\n");
     
-    // 如果是新记录或者更新现有记录，写入数据
-    if (!found_existing) {
-        // 写入文件头部信息（如果是第一次写入）
-        if (file_lines.empty()) {
-            fprintf(file, "# File format: fileIdx:<index> avg_port_length:<value> count:<value>\n");
+    // 遍历所有节点和端口的平均队列长度记录
+    for (auto& node_pair : RdmaSmartFlowRouting::record_all_port_AVG_queue_len) {
+        uint32_t nodeId = node_pair.first;
+        for (auto& port_pair : node_pair.second) {
+            uint32_t portId = port_pair.first;
+            record_avg_queue_length avg_queue_data = port_pair.second;
+            
+            // 写入每个节点端口的平均队列长度信息
+            fprintf(file, "%u\t%u\t%.6f\t%u\n", 
+                    nodeId, 
+                    portId, 
+                    avg_queue_data.now_avg_port_length, 
+                    avg_queue_data.count);
         }
     }
-    
-    // 写入当前数据
-    fprintf(file, "fileIdx:%s avg_port_length:%.6f count:%u\n", 
-            varMap->fileIdx.c_str(), 
-            RdmaSmartFlowRouting::avg_port_length.now_avg_port_length,
-            RdmaSmartFlowRouting::avg_port_length.count);
-    
+
+
+
     fflush(file);
     fclose(file);
-    
-    // 如果找到了现有的记录，需要重写整个文件
-    if (found_existing) {
-        FILE *rewrite_file = fopen(file_name.c_str(), "w");
-        if (rewrite_file != NULL) {
-            // 写入头部
-            fprintf(rewrite_file, "# File format: fileIdx:<index> avg_port_length:<value> count:<value>\n");
-            // 写入所有旧的记录
-            for (const auto& old_line : file_lines) {
-                fprintf(rewrite_file, "%s\n", old_line.c_str());
-            }
-            // 写入更新的记录
-            fprintf(rewrite_file, "fileIdx:%s avg_port_length:%.6f count:%u\n", 
-                    varMap->fileIdx.c_str(), 
-                    RdmaSmartFlowRouting::avg_port_length.now_avg_port_length,
-                    RdmaSmartFlowRouting::avg_port_length.count);
-            
-            fflush(rewrite_file);
-            fclose(rewrite_file);
-        }
-    }
-    
     return;
+    
 }
+
+// void save_avg_port_length(global_variable_t *varMap){
+
+//     std::string file_name = varMap->outputFileDir + "All_port_avg_queue_length.txt";
+    
+//     // 先读取现有文件内容，检查是否已存在相同的fileIdx
+//     std::vector<std::string> file_lines;
+//     std::ifstream infile(file_name);
+//     std::string line;
+//     bool found_existing = false;
+    
+//     if (infile.is_open()) {
+//         while (std::getline(infile, line)) {
+//             // 检查是否包含当前的fileIdx
+//             if (line.find("fileIdx:" + varMap->fileIdx) != std::string::npos) {
+//                 found_existing = true;
+//                 // 跳过旧的记录行
+//                 std::getline(infile, line); // 跳过avg_port_length行
+//                 continue;
+//             }
+//             file_lines.push_back(line);
+//         }
+//         infile.close();
+//     }
+    
+//     // 以追加模式打开文件
+//     FILE *file = fopen(file_name.c_str(), "a");
+//     if (file == NULL)
+//     {
+//         perror("Error opening file");
+//         return;
+//     }
+    
+//     // 如果是新记录或者更新现有记录，写入数据
+//     if (!found_existing) {
+//         // 写入文件头部信息（如果是第一次写入）
+//         if (file_lines.empty()) {
+//             fprintf(file, "# File format: fileIdx:<index> avg_port_length:<value> count:<value>\n");
+//         }
+//     }
+    
+//     // 写入当前数据
+//     fprintf(file, "fileIdx:%s avg_port_length:%.6f count:%u\n", 
+//             varMap->fileIdx.c_str(), 
+//             RdmaSmartFlowRouting::avg_port_length.now_avg_port_length,
+//             RdmaSmartFlowRouting::avg_port_length.count);
+    
+//     fflush(file);
+//     fclose(file);
+    
+//     // 如果找到了现有的记录，需要重写整个文件
+//     if (found_existing) {
+//         FILE *rewrite_file = fopen(file_name.c_str(), "w");
+//         if (rewrite_file != NULL) {
+//             // 写入头部
+//             fprintf(rewrite_file, "# File format: fileIdx:<index> avg_port_length:<value> count:<value>\n");
+//             // 写入所有旧的记录
+//             for (const auto& old_line : file_lines) {
+//                 fprintf(rewrite_file, "%s\n", old_line.c_str());
+//             }
+//             // 写入更新的记录
+//             fprintf(rewrite_file, "fileIdx:%s avg_port_length:%.6f count:%u\n", 
+//                     varMap->fileIdx.c_str(), 
+//                     RdmaSmartFlowRouting::avg_port_length.now_avg_port_length,
+//                     RdmaSmartFlowRouting::avg_port_length.count);
+            
+//             fflush(rewrite_file);
+//             fclose(rewrite_file);
+//         }
+//     }
+    
+//     return;
+// }
 
 
 void save_utilizationChange_outinfo(global_variable_t *varMap){
@@ -2689,6 +2722,10 @@ void save_utilizationChange_outinfo(global_variable_t *varMap){
         NS_LOG_ERROR("Cannot open file " << file_name);
         return;
     }
+    //记录前40流数节点对在有流发送时的路径带宽大于98%的概率
+    uint32_t sample_count=0;
+    uint32_t p98_count=0;
+
  // 遍历 record_path_utilization_rate 中的所有路径利用率数据
     for (const auto& pstKey_pair : RdmaSmartFlowRouting::record_path_utilization_rate) {
         const HostId2PathSeleKey& pstKey = pstKey_pair.first;
@@ -2708,6 +2745,17 @@ void save_utilizationChange_outinfo(global_variable_t *varMap){
             
             for (size_t i = 0; i < utilizationList.size(); ++i) {
                 const record_utilization_rate& rate = utilizationList[i];
+
+                //==============记录前40流数节点对在有流发送时的路径带宽大于98%的概率=================
+                if(rate.time>=starttime && rate.time<=endtime){
+                  sample_count++;
+                  if(rate.utilization_rate>=0.98){
+                      p98_count++;
+                  }
+                }
+                //==========================================================================
+                
+                
                 fprintf(file, "[%lu,%f]", rate.time, rate.utilization_rate);
                 if (i < utilizationList.size() - 1) {
                     fprintf(file, ",");
@@ -2716,7 +2764,7 @@ void save_utilizationChange_outinfo(global_variable_t *varMap){
             fprintf(file, "\n");
         }
     }
-
+    std::cout<<"前40流数节点对在有流发送时的路径带宽大于98%的概率:"<<(double)(p98_count)/sample_count<<std::endl;
     fflush(file);
     fclose(file);
     return;
@@ -2762,6 +2810,42 @@ void save_Avg_utilizationChange_outinfo(global_variable_t *varMap){
 
 
 }
+
+void save_ACK_and_Packet_measurement_delay_PMF(global_variable_t *varMap){
+  std::string file_name = varMap->outputFileDir + "-ACK_and_Packet_measurement_delay_PMF.txt";
+  FILE *file = fopen(file_name.c_str(), "w");
+    if (file == NULL) {
+        NS_LOG_ERROR("Cannot open file " << file_name);
+        return;
+    }
+     // 输出格式说明行
+    fprintf(file, "# Format: delay(us) ack_ratio packet_ratio (based on total count = %u)\n", 
+            RdmaSmartFlowRouting::m_record_ack_packet_delay.count);
+ // 使用count作为总数来计算占比
+    uint32_t total_count = RdmaSmartFlowRouting::m_record_ack_packet_delay.count;
+    
+    if (total_count > 0) {
+        // 输出每一行数据，计算占比
+        for (int i = 0; i < RdmaSmartFlowRouting::m_record_ack_packet_delay.ackdelay.size(); i++) {
+            double ack_ratio = (double)RdmaSmartFlowRouting::m_record_ack_packet_delay.ackdelay[i] / total_count;
+            double packet_ratio = (double)RdmaSmartFlowRouting::m_record_ack_packet_delay.packetdelay[i] / total_count;
+            fprintf(file, "%d %.6f %.6f\n", i, ack_ratio, packet_ratio);
+        }
+    } else {
+        // 如果count为0，输出0占比
+        for (int i = 0; i < 150; i++) {
+            fprintf(file, "%d 0.000000 0.000000\n", i);
+        }
+    }
+    fflush(file);
+    fclose(file);
+    return;
+
+}
+
+
+
+
  
 // 新增函数：计算路径超额使用率统计
   void calculate_path_overuse_statistics(global_variable_t *varMap)
@@ -4847,12 +4931,13 @@ RdmaSmartFlowRouting::sorted_path_flow_counts = std::move(temp_sorted_flow_count
     //
     save_qpFinshtest_outinfo(varMap);
      //======================新增部分，记录路径带宽利用率=========================
-    //save_utilizationChange_outinfo(varMap);
-    //save_Avg_utilizationChange_outinfo(varMap);
+    save_utilizationChange_outinfo(varMap);
+    save_Avg_utilizationChange_outinfo(varMap);
+    save_ACK_and_Packet_measurement_delay_PMF(varMap);
     //calculate_path_overuse_statistics(varMap);
 
     save_avg_port_length(varMap);
-    std::cout<<"利用率>80%的端口平均队列长度："<<RdmaSmartFlowRouting::avg_port_length.now_avg_port_length<<std::endl;
+    //std::cout<<"利用率>80%的端口平均队列长度："<<RdmaSmartFlowRouting::avg_port_length.now_avg_port_length<<std::endl;
     
     save_QPExec_outinfo(varMap);
 

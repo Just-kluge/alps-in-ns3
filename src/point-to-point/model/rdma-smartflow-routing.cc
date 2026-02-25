@@ -40,7 +40,10 @@ namespace ns3
      std::map<HostId2PathSeleKey,cal > RdmaSmartFlowRouting:: record_path_cal;
      std::map<uint32_t, std::map<uint32_t,std::vector<record_queue_length>>> RdmaSmartFlowRouting:: record_all_port_queue_len;
      RelErrorStats RdmaSmartFlowRouting::s_relErrorStats;
+     std::map<uint32_t, std::map<uint32_t,record_avg_queue_length>> RdmaSmartFlowRouting::record_all_port_AVG_queue_len;
      record_avg_queue_length  RdmaSmartFlowRouting::avg_port_length;
+     record_ack_packet_delay RdmaSmartFlowRouting::m_record_ack_packet_delay;
+     std::map<uint64_t,uint64_t > RdmaSmartFlowRouting::RecordAckSendTime;
      bool RdmaSmartFlowRouting::is_sim_finish=false;
    uint32_t RdmaSmartFlowRouting::choose_softmax=0; 
    uint64_t RdmaSmartFlowRouting::record_time=0;
@@ -1880,7 +1883,7 @@ std::vector<double> RdmaSmartFlowRouting::CalPathWeightBasedOnDelay(const std::v
             switch (choose_softmax)
             {
             case 0:
-                multiplier = laps_alpha;
+                multiplier = 0.2;
                 break;
             case 1:
                 multiplier = 5.0;
@@ -2187,7 +2190,7 @@ uint32_t RdmaSmartFlowRouting::GetPathBasedOnWeight(const std::vector<double> & 
 
        //===============================记录该路径距离上次路径时延更新后发了多少包===================================
         pitEntries[selPathIndex]->sent_pkt_num++;
-         //std::cout<<"PktId: "<<p->GetUid()<<" Pid: "<<fPid<<" "<<pitEntries[selPathIndex]->sent_pkt_num<<std::endl;
+         //std::cout<<"Data PktId: "<<p->GetUid()<<" Pid: "<<fPid<<" "<<pitEntries[selPathIndex]->sent_pkt_num<<std::endl;
 
         // probing
         PathData *prbeEntry = CheckProbePathAmoungPitEntries(pitEntries);
@@ -2294,11 +2297,14 @@ uint32_t RdmaSmartFlowRouting::GetPathBasedOnWeight(const std::vector<double> & 
                     std::cout<<"NULL"<<std::endl;
                   }
                 record_each_port_send_data[port_id].port_rate = rdma->m_rdma->m_nic[port_id].dev->GetDataRate().GetBitRate();
-                  
+                   
                 
 
             }
            record_each_port_send_data[port_id].send_data_byte+=p->GetSize();
+           //std::cout<<"ACK PktId: "<<p->GetUid()<<" Pid: "<<fPid<<" "<<pitEntries[selPathIndex]->sent_pkt_num<<std::endl;
+          //记录ACK发送时间
+           RecordAckSendTime[p->GetUid()]=Simulator::Now().GetNanoSeconds();
            //std::cout <<"端口"<<port_id<< " 发送数据包" <<p->GetSize()<<std::endl;
     //====================================增加对应端口的数据包记录，用来记录实际端口利用率==========
         

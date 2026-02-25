@@ -724,7 +724,10 @@ namespace ns3
 	{
 		// remove qp from the m_qpMap
 		uint64_t key = GetQpKey(qp->dip.Get(), qp->sport, qp->dport, qp->m_pg);
-		// m_finishedQpMap[key] = 0;
+	if(RdmaSmartFlowRouting::enable_laps_plus==0){
+		m_finishedQpMap[key] = 0;
+	}
+		 
 		m_qpMap.erase(key);
 	}
 
@@ -2182,11 +2185,46 @@ int RdmaHw::ReceiveProbeDataOnDstHostForLaps(Ptr<Packet> p, CustomHeader &ch)
 					int64_t data_caculated_delay=acktag.GetDelay();
                     
                     uint32_t path_hop=pitentry->portSequence.size();
+					uint32_t  baseline_path_delay=path_hop*1004;
+					uint32_t    throushold_delay=baseline_path_delay+21*84*path_hop;
 					//记录时延的两种测量方式的误差
-					 RdmaSmartFlowRouting::s_relErrorStats.Record(realdelay,ack_caculated_delay, data_caculated_delay);
+					 RdmaSmartFlowRouting::s_relErrorStats.Record(realdelay,ack_caculated_delay, data_caculated_delay,throushold_delay);
 					 RdmaSmartFlowRouting::s_relErrorStats.RecordHopDiff(path_hop,realdelay,ack_caculated_delay,data_caculated_delay);
 					  RdmaSmartFlowRouting::s_relErrorStats.RecordCongestionDiff(baseline_delay,realdelay,ack_caculated_delay, data_caculated_delay);
+					
+
+
+
+					 //=======================记录ACK，数据包测量所需要的总时间/基准时延的离散分布，用于画PMF图=========================
+					  //目前以不堵车的情况估计ACK返回所需要的时间，后续可以进行实际测量，估计结果大差不差
 					 
+					 
+					  //=================2.19  修改，分母从1004变为ACK_measurent_delay,改为测量测量延迟相对基准时延的倍率=======================
+					 uint32_t ACK_measurent_delay=path_hop*1004;
+					 
+					 if(RdmaSmartFlowRouting::RecordAckSendTime.find(p->GetUid())==RdmaSmartFlowRouting::RecordAckSendTime.end()){
+                        std::cout<<"ACK到达终点."<<"  但是没有记录发送时间"<<std::endl;
+					 }
+					 else{auto it = RdmaSmartFlowRouting::RecordAckSendTime.find(p->GetUid());
+						ACK_measurent_delay=Simulator::Now().GetNanoSeconds()- it->second;
+					   //std::cout<<"ACK到达终点."<<"    ACK返回所花时间："<<ACK_measurent_delay<<"基准时延 "<<baseline_path_delay<<std::endl;
+                       RdmaSmartFlowRouting::RecordAckSendTime.erase(it);
+					}
+
+
+                    RdmaSmartFlowRouting::m_record_ack_packet_delay.ackdelay[(int)((double)(ACK_measurent_delay)/baseline_path_delay*10+0.5)]++;
+					uint32_t packet_idx=(int)((double)(data_caculated_delay+ACK_measurent_delay)/baseline_path_delay*10+0.5);
+					//超过14的就记在149倍位置
+					if(packet_idx>=RdmaSmartFlowRouting::m_record_ack_packet_delay.packetdelay.size()){
+						packet_idx=RdmaSmartFlowRouting::m_record_ack_packet_delay.packetdelay.size()-1;
+					}
+					RdmaSmartFlowRouting::m_record_ack_packet_delay.packetdelay[packet_idx]++;
+                    RdmaSmartFlowRouting::m_record_ack_packet_delay.count++;
+                    //=======================记录ACK，数据包测量所需要的总时间的离散分布，用于画PMF图=========================
+					  
+
+
+
 					 //std::cout<<"真实时延："<<realdelay;
 
                     // std::cout << "，ACK到达终点." << "   数据包到达终点所用时间:" << acktag.GetDelay() << "    ACK带回来的估计时延（还没计算本地出端口长度）：" << ack_caculated_delay << std::endl;
@@ -4266,28 +4304,30 @@ ReceiverSequenceCheckResult RdmaHw::ReceiverCheckSeqForLaps(uint32_t seq, Ptr<Rd
 					RdmaSmartFlowRouting::record_all_port_utilization_rate[nodeId][portId].push_back(port_utilization_rate);
 					//===================更新带宽平均利用率==========================================
 					//粗略将没用的丢弃,看看效果
-					if(utilization!=0){
+					
 							 double avg_utilization_rate=RdmaSmartFlowRouting::record_all_port_avg_utilization_rate[nodeId][portId].utilization_rate;
 					 uint32_t update_count=RdmaSmartFlowRouting::record_all_port_avg_utilization_rate[nodeId][portId].update_count;
                     RdmaSmartFlowRouting::record_all_port_avg_utilization_rate[nodeId][portId].utilization_rate=(double)( avg_utilization_rate*update_count + utilization)/(update_count+1);
 					RdmaSmartFlowRouting::record_all_port_avg_utilization_rate[nodeId][portId].update_count++;
-					}
+					
 
 					//添加计算交换机高负载端口平均队列长度 ---二月六号
-					if(utilization>0.8&&RdmaSmartFlowRouting::record_all_port_queue_len[nodeId][portId].size()!=0&&node->GetNodeType() != 0 ){
+					if(RdmaSmartFlowRouting::record_all_port_queue_len[nodeId][portId].size()!=0&&node->GetNodeType() != 0 ){
 						uint32_t sum_queue_len=0;
                        uint32_t size1=RdmaSmartFlowRouting::record_all_port_queue_len[nodeId][portId].size();
-					   uint32_t count=RdmaSmartFlowRouting::avg_port_length.count;
+					   uint32_t count=RdmaSmartFlowRouting::record_all_port_AVG_queue_len[nodeId][portId].count;
 
 						for(uint32_t i=0;i<size1;i++){
 							sum_queue_len+=RdmaSmartFlowRouting::record_all_port_queue_len[nodeId][portId][i].length;
 						}
 
-                         double avg_queue_len=(double)(count*(RdmaSmartFlowRouting::avg_port_length.now_avg_port_length)+sum_queue_len)/(count+size1);
-                         RdmaSmartFlowRouting::avg_port_length.now_avg_port_length=avg_queue_len;
-						 RdmaSmartFlowRouting::avg_port_length.count+=size1;
+                         double avg_queue_len=(double)(count*(RdmaSmartFlowRouting::record_all_port_AVG_queue_len[nodeId][portId].now_avg_port_length)+sum_queue_len)/(count+size1);
+                         RdmaSmartFlowRouting::record_all_port_AVG_queue_len[nodeId][portId].now_avg_port_length=avg_queue_len;
+						 RdmaSmartFlowRouting::record_all_port_AVG_queue_len[nodeId][portId].count+=size1;
+						 //std::cout<<nodeId<<" "<<portId<<" "<<RdmaSmartFlowRouting::record_all_port_AVG_queue_len[nodeId][portId].now_avg_port_length<<std::endl;
                      
 					}
+					
 				
 					//std::cout<<"时间 "<<Simulator::Now().GetNanoSeconds()<<"，节点 "<<nodeId<<"，端口 "<<portId<<"，平均利用率 "<<RdmaSmartFlowRouting::record_all_port_avg_utilization_rate[nodeId][portId].utilization_rate<<std::endl;
 					//===================更新带宽平均利用率==========================================
@@ -4309,8 +4349,9 @@ ReceiverSequenceCheckResult RdmaHw::ReceiverCheckSeqForLaps(uint32_t seq, Ptr<Rd
 				   
                   //================================更新路径利用率============================
 				  if(RdmaSmartFlowRouting::enable_laps_plus){ 
-					  //取最多流的节点对
-				  HostId2PathSeleKey pstKey=RdmaSmartFlowRouting::sorted_path_flow_counts[0].first;
+					  //前1个流最多的节点对
+					  for(uint32_t i=0;i<1;i++){
+				  HostId2PathSeleKey pstKey=RdmaSmartFlowRouting::sorted_path_flow_counts[i].first;
 				  uint32_t srcHostId=pstKey.selfHostId;
 				  uint32_t dstHostId=pstKey.dstHostId;
 				  //可以用循环记录多个节点之间的路径的利用率
@@ -4352,7 +4393,7 @@ ReceiverSequenceCheckResult RdmaHw::ReceiverCheckSeqForLaps(uint32_t seq, Ptr<Rd
 
 
 				  }	
-				
+				  }
 
 
 

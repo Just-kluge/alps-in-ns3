@@ -8,3 +8,13 @@ results/
 .vscode/
 *.swp
 .DS_Store
+# Auto-added by copy script on 2026年 02月 25日 星期三 19:33:22 CST
+*-Rate.txt
+*-QpInfo.txt
+*-QpFinshTest.txt
+*-Probe.txt
+*-PathUtilizationChange.txt
+*-Para.txt
+*-AVGPortUtilization.txt
+*-All_port_avg_queue_length.txt
+*-FCT.txt

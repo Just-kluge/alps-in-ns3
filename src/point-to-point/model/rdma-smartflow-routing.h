@@ -94,8 +94,8 @@ struct RelErrorStats
     static constexpr int32_t SCALE = 1000;
 
     // [-200%, +200%]
-    static constexpr int32_t MIN_VAL = -2000;
-    static constexpr int32_t MAX_VAL =  2000;
+    static constexpr int32_t MIN_VAL = -500;
+    static constexpr int32_t MAX_VAL =  500;
     static constexpr uint32_t BIN_NUM = MAX_VAL - MIN_VAL + 1;
 
     // 相对误差分布
@@ -108,6 +108,8 @@ struct RelErrorStats
 
     int64_t ack_diff_sum  = 0;  // Σ(ack_ns - real_ns)
     int64_t data_diff_sum = 0;  // Σ(data_ns - real_ns)
+    int64_t  measurement_delay= 0;
+    int64_t  ACK_measurement_delay= 0;
 };
 // hop_count -> statistics
 std::map<uint32_t, HopDiffStats> hop_diff_table;
@@ -123,6 +125,8 @@ inline void RecordHopDiff(uint32_t hop,
 
 stat.ack_diff_sum  += std::llabs(ack_ns  - real_ns);
 stat.data_diff_sum += std::llabs(data_ns - real_ns);
+stat.measurement_delay+=data_ns + hop*1084;
+stat.ACK_measurement_delay+=hop*1024;
 //std::cout << "hop: " << hop << " real_ns: " << real_ns << " ack_ns: " << ack_ns << " data_ns: " << data_ns << " ack_diff: " << stat.ack_diff_sum << " data_diff: " << stat.data_diff_sum << std::endl;
 }
 void DumpHopDiffStats(const std::string &basePath)
@@ -146,12 +150,15 @@ void DumpHopDiffStats(const std::string &basePath)
 
         double ack_avg  = double(stat.ack_diff_sum)  / stat.sample_cnt;
         double data_avg = double(stat.data_diff_sum) / stat.sample_cnt;
-
-        fprintf(file, "%u %lu %.3f %.3f\n",
+        double measurement_delay_avg = stat.measurement_delay / stat.sample_cnt;
+        double ACK_measurement_delay_avg = stat.ACK_measurement_delay / stat.sample_cnt;
+        fprintf(file, "%u %lu %.3f %.3f %.3f %.3f\n",
                 hop,
                 stat.sample_cnt,
                 ack_avg,
-                data_avg);
+                data_avg,
+                measurement_delay_avg,
+               ACK_measurement_delay_avg);
     }
 
     fflush(file);
@@ -164,11 +171,13 @@ void DumpHopDiffStats(const std::string &basePath)
 
 enum CongestionLevel
 {
-    C2  = 2,
-    C4  = 4,
-    C6  = 6,
-    C8  = 8,
-    C10 = 10
+    C1  = 1,
+    C3  = 3,
+    C5  = 5,
+    C7  = 7,
+    C9 = 9,
+    C11=11
+
 };
 
 struct CongDiffStats
@@ -177,6 +186,8 @@ struct CongDiffStats
 
     int64_t ack_diff_sum  = 0;
     int64_t data_diff_sum = 0;
+    int64_t  measurement_delay= 0;
+    int64_t  ACK_measurement_delay= 0;
 };
 
 std::map<CongestionLevel, CongDiffStats> cong_diff_table;
@@ -192,22 +203,26 @@ inline void RecordCongestionDiff(
     double ratio = double(data_ns) / baseline_ns;
 
     CongestionLevel level;
-    if (ratio < 2.0)
-        level = C2;
-    else if (ratio < 4.0)
-        level = C4;
-    else if (ratio < 6.0)
-        level = C6;
-    else if (ratio < 8.0)
-        level = C8;
+    if (ratio < 3.0)
+        level = C1;
+    else if (ratio < 5.0)
+        level = C3;
+    else if (ratio < 7.0)
+        level = C5;
+    else if (ratio < 9.0)
+        level = C7;
+    else if (ratio < 11.0)
+        level = C9;
     else
-        level = C10;
+        level = C11;
 
     auto &stat = cong_diff_table[level];
     stat.sample_cnt++;
 
   stat.ack_diff_sum  += std::llabs(ack_ns  - real_ns);
 stat.data_diff_sum += std::llabs(data_ns - real_ns);
+stat.measurement_delay+=(data_ns + baseline_ns);
+stat.ACK_measurement_delay+=int(baseline_ns/1000)*1024;
 ////std::cout << "level: " << level << " real_ns: " << real_ns << " ack_ns: " << ack_ns << " data_ns: " << data_ns << " ack_diff: " << stat.ack_diff_sum << " data_diff: " << stat.data_diff_sum << std::endl;
 }
 
@@ -232,12 +247,16 @@ void DumpCongestionDiffStats(const std::string &basePath)
 
         double ack_avg  = double(stat.ack_diff_sum)  / stat.sample_cnt;
         double data_avg = double(stat.data_diff_sum) / stat.sample_cnt;
-
-        fprintf(file, "%d %lu %.3f %.3f\n",
+        double measurement_delay_avg = stat.measurement_delay / stat.sample_cnt;
+         double ACK_measurement_delay_avg = stat.ACK_measurement_delay / stat.sample_cnt;
+        fprintf(file, "%d %lu %.3f %.3f %.3f %.3f\n",
                 static_cast<int>(level),
                 stat.sample_cnt,
                 ack_avg,
-                data_avg);
+                data_avg,
+                measurement_delay_avg,
+                ACK_measurement_delay_avg
+            );
     }
 
     fflush(file);
@@ -290,17 +309,50 @@ void CoutHighestWeightPercent(void) const
         e2e_bins.resize(BIN_NUM, 0);
     }
 
-    inline void Record(int64_t real_ns,
+    // inline void Record(int64_t real_ns,
+    //                    int64_t ack_ns,
+    //                    int64_t data_ns,int64_t baseline_delay)
+    // {
+    //     if (real_ns <= 0)
+    //         return;
+
+    //     // ACK 相对误差
+    //     int64_t diff_ack = ack_ns - real_ns;
+    //     int32_t rel_ack = static_cast<int32_t>(
+    //         (diff_ack * SCALE) / real_ns + 0.5
+    //     );
+
+    //     if (rel_ack < MIN_VAL) rel_ack = MIN_VAL;
+    //     if (rel_ack > MAX_VAL) rel_ack = MAX_VAL;
+
+    //     ack_bins[rel_ack - MIN_VAL]++;
+
+    //     // e2e 相对误差
+    //     int64_t diff_e2e = data_ns - real_ns;
+    //     int32_t rel_e2e = static_cast<int32_t>(
+    //         (diff_e2e * SCALE) / real_ns + 0.5
+    //     );
+
+    //     if (rel_e2e < MIN_VAL) rel_e2e = MIN_VAL;
+    //     if (rel_e2e > MAX_VAL) rel_e2e = MAX_VAL;
+
+    //     e2e_bins[rel_e2e - MIN_VAL]++;
+
+    //     sample_cnt++;
+    // }
+
+//==============分母由路径实际时延变为基准时延
+inline void Record(int64_t real_ns,
                        int64_t ack_ns,
-                       int64_t data_ns)
+                       int64_t data_ns,int64_t baseline_delay)
     {
-        if (real_ns <= 0)
+        if (baseline_delay <= 0)
             return;
 
         // ACK 相对误差
         int64_t diff_ack = ack_ns - real_ns;
         int32_t rel_ack = static_cast<int32_t>(
-            (diff_ack * SCALE) / real_ns + 0.5
+            (double)(diff_ack * 100) / baseline_delay + 0.5
         );
 
         if (rel_ack < MIN_VAL) rel_ack = MIN_VAL;
@@ -311,7 +363,7 @@ void CoutHighestWeightPercent(void) const
         // e2e 相对误差
         int64_t diff_e2e = data_ns - real_ns;
         int32_t rel_e2e = static_cast<int32_t>(
-            (diff_e2e * SCALE) / real_ns + 0.5
+            (double)(diff_e2e * 100) / baseline_delay + 0.5
         );
 
         if (rel_e2e < MIN_VAL) rel_e2e = MIN_VAL;
@@ -322,6 +374,33 @@ void CoutHighestWeightPercent(void) const
         sample_cnt++;
     }
 
+
+//     void Dump(const std::string &basePath) const
+// {
+//     std::string file_name = basePath + "relative_error.txt";
+//     FILE *file = fopen(file_name.c_str(), "w");
+//     if (file == nullptr)
+//     {
+//         perror("Error opening relative error file");
+//         return;
+//     }
+
+//     // 第一行：追踪到的 ACK 样本总数
+//     fprintf(file, "%lu\n", sample_cnt);
+
+//     // 每一行：相对误差(%) ACK_count E2E_count
+//     for (uint32_t i = 0; i < BIN_NUM; ++i)
+//     {
+//         int32_t rel = MIN_VAL + i;
+//         fprintf(file, "%.1f %lu %lu\n",
+//                 rel / 10.0,
+//                 ack_bins[i],
+//                 e2e_bins[i]);
+//     }
+
+//     fflush(file);
+//     fclose(file);
+// }
     void Dump(const std::string &basePath) const
 {
     std::string file_name = basePath + "relative_error.txt";
@@ -340,7 +419,7 @@ void CoutHighestWeightPercent(void) const
     {
         int32_t rel = MIN_VAL + i;
         fprintf(file, "%.1f %lu %lu\n",
-                rel / 10.0,
+                rel / 1.0,
                 ack_bins[i],
                 e2e_bins[i]);
     }
@@ -384,6 +463,12 @@ struct record_avg_queue_length{
       uint32_t count=0;
 
 };
+struct record_ack_packet_delay{
+      uint32_t count=0;
+      std::vector<uint32_t> ackdelay  = std::vector<uint32_t>(2600, 0);
+      std::vector<uint32_t> packetdelay = std::vector<uint32_t>(2600, 0);
+};
+
 
   class RdmaSmartFlowRouting : public Object
   {
@@ -394,7 +479,7 @@ struct record_avg_queue_length{
     RdmaSmartFlowRouting();
     virtual ~RdmaSmartFlowRouting();
     
-
+    
     struct send_data{
      uint64_t time=0;
      //========
@@ -417,8 +502,14 @@ struct record_avg_queue_length{
        //记录当带宽利用率超过80%以上的端口队列平均长度
        static record_avg_queue_length avg_port_length;
 
-//===============================记录端口队列长度，每2us 记录一次
+         static std::map<uint64_t,uint64_t > RecordAckSendTime;
+
+//===============================记录端口队列长度，每2us 记录一次===================
 static std::map<uint32_t, std::map<uint32_t,std::vector<record_queue_length>>> record_all_port_queue_len;
+//===========================用上面的数据计算平均队列长度============
+static std::map<uint32_t, std::map<uint32_t,record_avg_queue_length>> record_all_port_AVG_queue_len;
+//=======================================记录ACK和数据包测量延迟的变量====================
+static record_ack_packet_delay m_record_ack_packet_delay;
     //-------------------------------------------------------------------启动laps_plus-----------------------------------------------------
      static std::map<uint32_t, std::map<uint32_t,std::vector<record_utilization_rate>>> record_all_port_utilization_rate;
      static std::map<uint32_t, std::map<uint32_t,record_utilization_rate>> record_all_port_avg_utilization_rate;

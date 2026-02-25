@@ -1189,6 +1189,8 @@ namespace ns3
   void save_QpRateChange_outinfo(global_variable_t *varMap);
   void save_Conweave_pathload_outinfo(global_variable_t *varMap);
   void save_Conweave_DstTorQueue_outinfo(global_variable_t *varMap);
+  void save_ACK_and_Packet_measurement_delay_PMF(global_variable_t *varMap);
+
   void sim_finish(global_variable_t *varMap);
   void save_qpFinshtest_outinfo(global_variable_t *varMap);
    void save_QPSend_outinfo(global_variable_t *varMap);
@@ -1393,7 +1395,7 @@ namespace ns3
 
   void install_kv_cache_applications(global_variable_t *varMap);
   void monitor_special_port_qlen(global_variable_t *varMap, uint32_t nodeId, uint32_t portId, uint32_t roundIdx);
-
+  void monitor_port_qlen(global_variable_t *varMap) ;
   void install_flows_in_tcp_bulk_on_node_pair_with_flow_classification(Ptr<Node> srcServerNode, Ptr<Node> dstServerNode,
                                                                        double requestRate, struct cdf_table *cdfTable, long &flowCount, long &totalFlowSize,
                                                                        double START_TIME, double END_TIME, double FLOW_LAUNCH_END_TIME,
